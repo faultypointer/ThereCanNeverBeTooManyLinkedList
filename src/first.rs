@@ -158,9 +158,18 @@ impl List {
         // when matching in the first attempt match &self.head is burrowing immutably and the call to replace needs a mutable borrow
         // accoridng to rust borrowing rule we can either have multiple shared burrow or single mutable borrow
     }
+}
 
-
-    // TODO drop
+// we are gonna have to implement drop ourselves. as we can't rely on compiler for tail recusion. when dropping the `Box<Node>` the tail recursion cannot happen since we have to deallocate the
+// box pointer afterwards
+impl Drop for List {
+    fn drop(&mut self) {
+        let mut current_link = mem::replace(&mut self.head, Link::Empty);
+        while let Link::More(mut boxed_node) = current_link {
+            current_link = mem::replace(&mut boxed_node.next, Link::Empty);
+            // here boxed_node goes out of scope. and since we replaced its next with empty no unbounded recursion happens
+        }
+    }
 }
 
 #[cfg(test)] // tells the compiler to only compile whole test module when running cargo test
