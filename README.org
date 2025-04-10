@@ -1,0 +1,7 @@
+#+title: There Can Never Be Too Many LinkedList
+#+author: faultypointer
+
+Learning Rust (again) using the book [[https://rust-unofficial.github.io/too-many-lists/first-drop.html][Too Many LinkedList]].
+
+Trying the literate programming thing (probably incorrectly) so there is gonna be a lot of comments
+some straight up copy from the book some with my personal twist. I'll try to add somethign extra if i get the chance.
