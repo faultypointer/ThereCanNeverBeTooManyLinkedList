@@ -8,7 +8,7 @@
 // and two pointers in the list itself
 //
 
-use std::cell::RefCell;
+use std::cell::{Ref, RefCell, RefMut};
 use std::rc::Rc;
 
 struct Node<T> {
@@ -181,6 +181,74 @@ impl<T> List<T> {
             Rc::try_unwrap(old_head).ok().unwrap().into_inner().elem
         })
     }
+
+    // peeking in the front
+    // pub fn peek_front(&self) -> Option(&T) {
+    //     self.head.as_ref().map(|node| &node.borrow().elem)
+    // }
+    // this is not gonna work. borrow returns Ref which is gonna be dropped at the end of the function the reference we returned is tied to the Ref
+    // so it is illegal to return that reference
+    // so our option is to return the Ref<T> itself
+    pub fn peek_front(&self) -> Option<Ref<T>> {
+        self.head
+            .as_ref()
+            .map(|node| Ref::map(node.borrow(), |node| &node.elem))
+    }
+
+    // and for the tail versions of all of these
+    pub fn push_back(&mut self, elem: T) {
+        let new_node = Node::new(elem);
+        match self.tail.take() {
+            None => {
+                // the order is important not for the logic of doubly linked list
+                // but the second assignments moves the new_node so if it is done first
+                // Rc::clone cannot be called on it afterwards
+                self.head = Some(Rc::clone(&new_node));
+                self.tail = Some(new_node);
+            }
+            Some(old_tail) => {
+                // same reason for the order here
+                new_node.borrow_mut().prev = Some(Rc::clone(&old_tail));
+                old_tail.borrow_mut().next = Some(Rc::clone(&new_node));
+                self.tail = Some(new_node);
+            }
+        }
+    }
+
+    pub fn pop_back(&mut self) -> Option<T> {
+        self.tail.take().map(|old_tail| {
+            match old_tail.borrow_mut().prev.take() {
+                None => {
+                    self.head.take();
+                }
+                Some(new_tail) => {
+                    new_tail.borrow_mut().next.take();
+                    self.tail = Some(new_tail);
+                }
+            }
+            Rc::try_unwrap(old_tail).ok().unwrap().into_inner().elem
+        })
+    }
+
+    // peeking in the back
+    pub fn peek_back(&self) -> Option<Ref<T>> {
+        self.tail
+            .as_ref()
+            .map(|node| Ref::map(node.borrow(), |node| &node.elem))
+    }
+
+    // mutable peek
+    pub fn peek_front_mut(&mut self) -> Option<RefMut<T>> {
+        self.head
+            .as_mut()
+            .map(|node| RefMut::map(node.borrow_mut(), |node| &mut node.elem))
+    }
+
+    pub fn peek_back_mut(&mut self) -> Option<RefMut<T>> {
+        self.tail
+            .as_mut()
+            .map(|node| RefMut::map(node.borrow_mut(), |node| &mut node.elem))
+    }
 }
 
 // DROPPING: Rc and Cycle
@@ -194,6 +262,55 @@ impl<T> Drop for List<T> {
         while self.pop_front().is_some() {}
     }
 }
+
+// iterators
+// into iter
+pub struct IntoIter<T>(List<T>);
+
+impl<T> List<T> {
+    pub fn into_iter(self) -> IntoIter<T> {
+        IntoIter(self)
+    }
+}
+
+impl<T> Iterator for IntoIter<T> {
+    type Item = T;
+    fn next(&mut self) -> Option<Self::Item> {
+        self.0.pop_front()
+    }
+}
+
+// and in reverse
+impl<T> DoubleEndedIterator for IntoIter<T> {
+    fn next_back(&mut self) -> Option<Self::Item> {
+        self.0.pop_back()
+    }
+}
+
+// now Iter
+// pub struct Iter<'a, T>(Option<Ref<'a, Node<T>>>);
+
+// impl<T> List<T> {
+//     pub fn iter(&self) -> Iter<T> {
+//         Iter(self.head.as_ref().map(|head| head.borrow()))
+//     }
+// }
+
+// impl<'a, T> Iterator for Iter<'a, T> {
+//     type Item = Ref<'a, T>;
+//     fn next(&mut self) -> Option<Self::Item> {
+//         self.0.take().map(|node_ref| {
+//             let (next, elem) = Ref::map_split(node_ref, |node| (&node.next, &node.elem));
+//             self.0 = if next.is_some() {
+//                 Some(Ref::map(next, |next| &**next.as_ref().unwrap()))
+//             } else {
+//                 None
+//             };
+//             elem
+//         })
+//     }
+// }
+// giving up on iter and itermut (the book did too)
 
 #[cfg(test)]
 mod tests {
@@ -219,5 +336,65 @@ mod tests {
         // Check exhaustion
         assert_eq!(list.pop_front(), Some(1));
         assert_eq!(list.pop_front(), None);
+    }
+
+    #[test]
+    fn peek_front() {
+        let mut list = List::new();
+        assert!(list.peek_front().is_none());
+        list.push_front(23);
+        list.push_front(42);
+        assert_eq!(&*list.peek_front().unwrap(), &42);
+        _ = list.pop_front();
+        assert_eq!(&*list.peek_front().unwrap(), &23);
+    }
+
+    #[test]
+    fn back() {
+        let mut list = List::new();
+        assert_eq!(list.pop_front(), None);
+        list.push_back(1);
+        list.push_back(42);
+        list.push_back(43);
+        assert_eq!(list.pop_back(), Some(43));
+        assert_eq!(list.pop_back(), Some(42));
+
+        // Push some more just to make sure nothing's corrupted
+        list.push_back(4);
+        list.push_back(5);
+
+        // Check normal removal
+        assert_eq!(list.pop_back(), Some(5));
+        assert_eq!(list.pop_back(), Some(4));
+
+        // Check exhaustion
+        assert_eq!(list.pop_back(), Some(1));
+        assert_eq!(list.pop_back(), None);
+    }
+
+    #[test]
+    fn peek_back() {
+        let mut list = List::new();
+        assert!(list.peek_back().is_none());
+        list.push_front(23);
+        list.push_front(42);
+        assert_eq!(&*list.peek_back().unwrap(), &23);
+        _ = list.pop_back();
+        assert_eq!(&*list.peek_back().unwrap(), &42);
+    }
+
+    #[test]
+    fn into_iter() {
+        let mut list = List::new();
+        list.push_front(1);
+        list.push_front(2);
+        list.push_front(3);
+
+        let mut iter = list.into_iter();
+        assert_eq!(iter.next(), Some(3));
+        assert_eq!(iter.next_back(), Some(1));
+        assert_eq!(iter.next(), Some(2));
+        assert_eq!(iter.next_back(), None);
+        assert_eq!(iter.next(), None);
     }
 }
